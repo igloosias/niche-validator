@@ -453,13 +453,37 @@ class Crawl4AiCollector:
 # ============================================
 
 class NicheValidatorServer:
-    """Main server class integrating all collectors"""
+    """Main server class integrating all collectors - lazy initialization"""
 
     def __init__(self):
-        self.pytrends = PyTrendsModernCollector()
-        self.agent_reach = AgentReachCollector()
-        self.scrapegraphai = ScrapeGraphAICollector()
-        self.crawl4ai = Crawl4AiCollector()
+        self._pytrends = None
+        self._agent_reach = None
+        self._scrapegraphai = None
+        self._crawl4ai = None
+
+    @property
+    def pytrends(self):
+        if self._pytrends is None:
+            self._pytrends = PyTrendsModernCollector()
+        return self._pytrends
+
+    @property
+    def agent_reach(self):
+        if self._agent_reach is None:
+            self._agent_reach = AgentReachCollector()
+        return self._agent_reach
+
+    @property
+    def scrapegraphai(self):
+        if self._scrapegraphai is None:
+            self._scrapegraphai = ScrapeGraphAICollector()
+        return self._scrapegraphai
+
+    @property
+    def crawl4ai(self):
+        if self._crawl4ai is None:
+            self._crawl4ai = Crawl4AiCollector()
+        return self._crawl4ai
 
     async def validate_niche(self, niche: str) -> Dict[str, Any]:
         """Run full niche validation using all tools"""
@@ -594,8 +618,10 @@ def main():
         print("✅ FastAPI installed. Please run again.")
         return
 
-    print("🚀 Starting server at http://localhost:8000")
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    # Railway provides PORT environment variable
+    port = int(os.environ.get("PORT", 8000))
+    print(f"🚀 Starting server at http://0.0.0.0:{port}")
+    uvicorn.run(app, host="0.0.0.0", port=port)
 
 
 if __name__ == "__main__":
