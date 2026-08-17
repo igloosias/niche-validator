@@ -31,15 +31,17 @@ export async function collectGoogleTrendsData(keyword: string): Promise<TrendDat
   // In production, this would call a server-side endpoint running PyTrends
   // For now, generate realistic simulated data based on keyword analysis
 
-  const baseInterest = calculateBaseInterest(keyword);
-  const trendDirection = calculateTrendDirection(keyword);
-  const growthRate = calculateGrowthRate(keyword);
+  // Use seeded random for consistent results
+  const random = seededRandom(keyword);
+  const baseInterest = calculateBaseInterest(keyword, random);
+  const trendDirection = calculateTrendDirection(keyword, random);
+  const growthRate = calculateGrowthRate(keyword, random);
 
   // Generate 12 months of data
-  const interestOverTime = generateTrendTimeSeries(baseInterest, trendDirection, growthRate);
+  const interestOverTime = generateTrendTimeSeries(baseInterest, trendDirection, growthRate, random);
 
   // Generate related queries
-  const relatedQueries = generateRelatedQueries(keyword, baseInterest);
+  const relatedQueries = generateRelatedQueries(keyword, baseInterest, random);
 
   return {
     interestOverTime,
@@ -54,8 +56,24 @@ export async function collectGoogleTrendsData(keyword: string): Promise<TrendDat
   };
 }
 
+// Seeded random for consistent results
+function seededRandom(seed: string): () => number {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i++) {
+    const char = seed.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash;
+  }
+  return function() {
+    hash = Math.imul(hash ^ (hash >>> 16), 0x85ebca6b);
+    hash = Math.imul(hash ^ (hash >>> 13), 0xc2b2ae35);
+    hash ^= hash >>> 16;
+    return (hash >>> 0) / 4294967296;
+  };
+}
+
 // Calculate base interest score (0-100) based on keyword analysis
-function calculateBaseInterest(keyword: string): number {
+function calculateBaseInterest(keyword: string, random: () => number): number {
   const lowerKeyword = keyword.toLowerCase();
 
   // High-demand keywords
@@ -82,9 +100,9 @@ function calculateBaseInterest(keyword: string): number {
 
   // Adjust based on patterns
   if (highDemandPatterns.some(p => lowerKeyword.includes(p))) {
-    baseScore = 70 + Math.random() * 20;
+    baseScore = 70 + random() * 20;
   } else if (mediumDemandPatterns.some(p => lowerKeyword.includes(p))) {
-    baseScore = 50 + Math.random() * 20;
+    baseScore = 50 + random() * 20;
   }
 
   // Boost for product-related searches
@@ -99,7 +117,7 @@ function calculateBaseInterest(keyword: string): number {
 }
 
 // Calculate trend direction
-function calculateTrendDirection(keyword: string): 'rising' | 'stable' | 'falling' {
+function calculateTrendDirection(keyword: string, random: () => number): 'rising' | 'stable' | 'falling' {
   const lowerKeyword = keyword.toLowerCase();
 
   // Trending patterns (2024-2025)
@@ -114,16 +132,16 @@ function calculateTrendDirection(keyword: string): 'rising' | 'stable' | 'fallin
   ];
 
   if (risingPatterns.some(p => lowerKeyword.includes(p))) {
-    return Math.random() > 0.3 ? 'rising' : 'stable';
+    return random() > 0.3 ? 'rising' : 'stable';
   }
 
   if (decliningPatterns.some(p => lowerKeyword.includes(p))) {
-    return Math.random() > 0.3 ? 'falling' : 'stable';
+    return random() > 0.3 ? 'falling' : 'stable';
   }
 
   const directions: ('rising' | 'stable' | 'falling')[] = ['rising', 'stable', 'falling'];
   const weights = [0.35, 0.4, 0.25];
-  const rand = Math.random();
+  const rand = random();
 
   if (rand < weights[0]) return 'rising';
   if (rand < weights[0] + weights[1]) return 'stable';
@@ -131,15 +149,15 @@ function calculateTrendDirection(keyword: string): 'rising' | 'stable' | 'fallin
 }
 
 // Calculate growth rate percentage
-function calculateGrowthRate(keyword: string): number {
-  const direction = calculateTrendDirection(keyword);
+function calculateGrowthRate(keyword: string, random: () => number): number {
+  const direction = calculateTrendDirection(keyword, random);
 
   if (direction === 'rising') {
-    return 5 + Math.random() * 25; // 5-30% growth
+    return 5 + random() * 25; // 5-30% growth
   } else if (direction === 'stable') {
-    return (Math.random() - 0.5) * 10; // -5% to +5%
+    return (random() - 0.5) * 10; // -5% to +5%
   } else {
-    return -5 - Math.random() * 20; // -5% to -25% decline
+    return -5 - random() * 20; // -5% to -25% decline
   }
 }
 
@@ -147,7 +165,8 @@ function calculateGrowthRate(keyword: string): number {
 function generateTrendTimeSeries(
   baseInterest: number,
   direction: 'rising' | 'stable' | 'falling',
-  growthRate: number
+  growthRate: number,
+  random: () => number
 ): { date: string; value: number }[] {
   const data: { date: string; value: number }[] = [];
   const now = new Date();
@@ -173,7 +192,7 @@ function generateTrendTimeSeries(
     value *= seasonalMultiplier;
 
     // Add random noise
-    value += (Math.random() - 0.5) * 10;
+    value += (random() - 0.5) * 10;
 
     data.push({
       date: dateStr,
@@ -255,7 +274,8 @@ function getSeasonalityMonths(keyword: string): string[] {
 // Generate related queries
 function generateRelatedQueries(
   keyword: string,
-  baseInterest: number
+  baseInterest: number,
+  random: () => number
 ): { query: string; value: number; trend: 'rising' | 'falling' | 'stable' }[] {
   const prefixes = ['best', 'top', 'cheap', 'affordable', 'review', 'vs', 'how to', 'what is', 'where to buy'];
   const suffixes = ['for men', 'for women', '2024', '2025', 'mini', 'portable', 'wireless', 'led'];
@@ -263,17 +283,17 @@ function generateRelatedQueries(
   const queries: { query: string; value: number; trend: 'rising' | 'falling' | 'stable' }[] = [];
 
   // Generate 8-12 related queries
-  const count = 8 + Math.floor(Math.random() * 5);
+  const count = 8 + Math.floor(random() * 5);
 
   for (let i = 0; i < count; i++) {
-    const usePrefix = Math.random() > 0.5;
+    const usePrefix = random() > 0.5;
     const query = usePrefix
-      ? `${prefixes[Math.floor(Math.random() * prefixes.length)]} ${keyword}`
-      : `${keyword} ${suffixes[Math.floor(Math.random() * suffixes.length)]}`;
+      ? `${prefixes[Math.floor(random() * prefixes.length)]} ${keyword}`
+      : `${keyword} ${suffixes[Math.floor(random() * suffixes.length)]}`;
 
-    const value = Math.round(baseInterest * (0.3 + Math.random() * 0.7));
+    const value = Math.round(baseInterest * (0.3 + random() * 0.7));
     const trends: ('rising' | 'falling' | 'stable')[] = ['rising', 'stable', 'stable', 'stable', 'falling'];
-    const trend = trends[Math.floor(Math.random() * trends.length)];
+    const trend = trends[Math.floor(random() * trends.length)];
 
     queries.push({ query: query.trim(), value, trend });
   }

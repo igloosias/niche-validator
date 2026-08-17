@@ -111,11 +111,12 @@ function transformTrendsData(data: any): TrendData {
   }
 
   const relatedQueries: RelatedQuery[] = [];
+  const random = seededRandom('pytrends-' + data.keyword);
   if (data.related_queries) {
     data.related_queries.forEach((query: string, index: number) => {
       relatedQueries.push({
         query,
-        searches: Math.round(1000 + Math.random() * 10000),
+        searches: Math.round(1000 + random() * 10000),
         trend: 'rising'
       });
     });

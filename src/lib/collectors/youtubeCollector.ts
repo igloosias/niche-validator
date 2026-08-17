@@ -122,13 +122,29 @@ export async function collectYouTubeData(keyword: string): Promise<YouTubeAnalys
   }
 }
 
+// Seeded random for consistent results
+function seededRandom(seed: string): () => number {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i++) {
+    const char = seed.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash;
+  }
+  return function() {
+    hash = Math.imul(hash ^ (hash >>> 16), 0x85ebca6b);
+    hash = Math.imul(hash ^ (hash >>> 13), 0xc2b2ae35);
+    hash ^= hash >>> 16;
+    return (hash >>> 0) / 4294967296;
+  };
+}
+
 // Simulated data fallback
 function generateSimulatedYouTubeData(keyword: string): YouTubeAnalysis {
-  const seed = keyword.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-  const random = (min: number, max: number) => Math.floor((Math.sin(seed) * 10000) % 1 * (max - min)) + min;
+  // Use proper seeded random for consistent results
+  const random = seededRandom(keyword + 'youtube');
 
-  const videoCount = random(50, 500);
-  const avgViews = random(5000, 50000);
+  const videoCount = Math.round(50 + random() * 450);
+  const avgViews = Math.round(5000 + random() * 45000);
 
   return {
     totalVideos: videoCount,
@@ -147,11 +163,11 @@ function generateSimulatedYouTubeData(keyword: string): YouTubeAnalysis {
     channels: Array.from({ length: 3 }, (_, i) => ({
       channelId: `ch_${i}`,
       title: `${keyword} Channel ${i + 1}`,
-      subscriberCount: random(10000, 500000),
-      videoCount: random(20, 200),
+      subscriberCount: Math.round(10000 + random() * 490000),
+      videoCount: Math.round(20 + random() * 180),
     })),
-    contentScore: random(40, 80),
-    trendIndicator: random(0, 2) > 1 ? 'rising' : random(0, 2) > 1 ? 'declining' : 'stable',
+    contentScore: Math.round(40 + random() * 40),
+    trendIndicator: random() > 0.66 ? 'rising' : random() > 0.33 ? 'stable' : 'declining',
   };
 }
 

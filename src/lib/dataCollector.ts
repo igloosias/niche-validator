@@ -333,6 +333,9 @@ export async function collectNicheData(niche: string): Promise<CollectedData> {
 }
 
 export async function collectProductData(niche: string, count: number = 10): Promise<ProductData[]> {
+  // Use seeded random for consistent results
+  const random = seededRandom(niche + 'products');
+
   // Try to get real AliExpress data
   const aliExpressResult = await searchAliExpressProducts(niche, count);
 
@@ -362,9 +365,9 @@ export async function collectProductData(niche: string, count: number = 10): Pro
       imageUrl: product.imageUrl,
       shippingTime: `${product.shipping.estimatedDays} days`,
       weight: '0.5 kg',
-      returnRate: 5 + Math.random() * 10,
+      returnRate: 5 + random() * 10,
       competitorCount: Math.round(product.orders / 100),
-      socialMentions: Math.round(Math.random() * 1000),
+      socialMentions: Math.round(random() * 1000),
       source: dataSource
     };
   });

@@ -236,25 +236,41 @@ export async function collectRedditData(keyword: string): Promise<RedditAnalysis
   }
 }
 
+// Seeded random for consistent results
+function seededRandom(seed: string): () => number {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i++) {
+    const char = seed.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash;
+  }
+  return function() {
+    hash = Math.imul(hash ^ (hash >>> 16), 0x85ebca6b);
+    hash = Math.imul(hash ^ (hash >>> 13), 0xc2b2ae35);
+    hash ^= hash >>> 16;
+    return (hash >>> 0) / 4294967296;
+  };
+}
+
 // Simulated data fallback
 function generateSimulatedRedditData(keyword: string): RedditAnalysis {
-  const seed = keyword.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-  const random = (min: number, max: number) => Math.floor((Math.sin(seed) * 10000 % 1) * (max - min)) + min;
+  // Use proper seeded random for consistent results
+  const random = seededRandom(keyword + 'reddit');
 
-  const postCount = random(20, 150);
-  const avgScore = random(10, 500);
-  const sentiment = (Math.random() - 0.5) * 0.6; // -0.3 to 0.3
+  const postCount = Math.round(20 + random() * 130);
+  const avgScore = Math.round(10 + random() * 490);
+  const sentiment = (random() - 0.5) * 0.6; // -0.3 to 0.3
 
   const posts: RedditPost[] = Array.from({ length: Math.min(postCount, 10) }, (_, i) => ({
     id: `sim_${i}`,
-    title: `[${i % 2 === 0 ? 'Question' : 'Discussion'}] ${keyword} - ${getRandomTopic(seed + i)}`,
-    subreddit: getRandomSubreddit(seed + i),
-    subredditUrl: `https://reddit.com/r/${getRandomSubreddit(seed + i)}`,
+    title: `[${i % 2 === 0 ? 'Question' : 'Discussion'}] ${keyword} - ${getRandomTopic(random)}`,
+    subreddit: getRandomSubreddit(random),
+    subredditUrl: `https://reddit.com/r/${getRandomSubreddit(random)}`,
     score: Math.round(avgScore * (1 - i * 0.1)),
     numComments: Math.round(avgScore * 0.2 * (1 - i * 0.1)),
     url: `https://reddit.com/r/example/comments/${i}`,
     createdAt: new Date(Date.now() - i * 24 * 60 * 60 * 1000).toISOString(),
-    sentiment: sentiment + (Math.random() - 0.5) * 0.2,
+    sentiment: sentiment + (random() - 0.5) * 0.2,
   }));
 
   const { painPoints, opportunities } = extractInsights(posts);
@@ -279,7 +295,7 @@ function generateSimulatedRedditData(keyword: string): RedditAnalysis {
   };
 }
 
-function getRandomTopic(seed: number): string {
+function getRandomTopic(random: () => number): string {
   const topics = [
     'experiences and tips',
     'is this worth it?',
@@ -290,12 +306,12 @@ function getRandomTopic(seed: number): string {
     'getting started',
     'scaling advice',
   ];
-  return topics[seed % topics.length];
+  return topics[Math.floor(random() * topics.length)];
 }
 
-function getRandomSubreddit(seed: number): string {
+function getRandomSubreddit(random: () => number): string {
   const subreddits = ['dropshipping', 'ecommerce', 'shopify', 'entrepreneur', 'smallbusiness'];
-  return subreddits[seed % subreddits.length];
+  return subreddits[Math.floor(random() * subreddits.length)];
 }
 
 export function getRedditPostUrl(postId: string, subreddit: string): string {
