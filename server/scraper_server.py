@@ -280,18 +280,29 @@ class ScrapeGraphAICollector:
         url = self._build_url(site, keyword)
 
         try:
-            from scrapegraphai import GraphReader
+            from scrapegraphai.nodes import SearchLink
+            from openai import OpenAI
 
-            graph_config = {
-                "api_key": os.getenv("SCRAPEGRAPHAI_API_KEY", os.getenv("OPENAI_API_KEY", ""))
-            }
+            api_key = os.getenv("SCRAPEGRAPHAI_API_KEY") or os.getenv("OPENAI_API_KEY", "")
+            print(f"🔑 ScrapeGraphAI API key present: {bool(api_key)}")
 
-            reader = GraphReader(
-                graph_name="ProductsScraper",
-                config=graph_config
+            if not api_key:
+                print("⚠️ No API key found, using mock data")
+                return self._generate_mock_products(keyword, site)
+
+            # Use ScrapeGraphAI's SearchLink node
+            search_node = SearchLink(
+                input_key="search_query",
+                output_key="link_list",
+                config={
+                    "llm": {
+                        "api_key": api_key,
+                        "model_name": "gpt-4"
+                    }
+                }
             )
 
-            result = await reader.ascrape_url(url)
+            result = search_node.run({"search_query": keyword})
 
             products = self._parse_scrape_result(result, site)
 
@@ -302,11 +313,11 @@ class ScrapeGraphAICollector:
                 source=f"ScrapeGraphAI ({site})"
             )
 
-        except ImportError:
-            print("⚠️ scrapegraphai not installed. Run: pip install scrapegraphai")
+        except ImportError as e:
+            print(f"⚠️ scrapegraphai not installed or import error: {e}")
             return self._generate_mock_products(keyword, site)
         except Exception as e:
-            print(f"⚠️ ScrapeGraphAI error: {e}")
+            print(f"⚠️ ScrapeGraphAI error: {type(e).__name__}: {e}")
             return self._generate_mock_products(keyword, site)
 
     def _build_url(self, site: str, keyword: str) -> str:
