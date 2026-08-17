@@ -8,17 +8,17 @@ uvicorn[standard]>=0.30.0
 # Google Trends
 pytrends>=4.9.2
 
-# AI-Powered Scraping (commented - can cause build issues)
-# scrapegraphai>=1.7.2
+# AI-Powered Scraping
+scrapegraphai>=1.7.2
 
-# Social Media Scraping (commented - can cause build issues)
-# agent-reach>=0.1.0
+# Social Media Scraping
+agent-reach>=0.1.0
 
-# Fast Web Crawling (optional - can be slow on Railway)
-# crawl4ai>=0.3.0
+# Fast Web Crawling
+crawl4ai>=0.3.0
 
-# Browser Automation (optional - required only for Crawl4AI)
-# playwright>=1.47.0
+# Browser Automation (for Crawl4AI)
+playwright>=1.47.0
 
 # HTTP Requests
 httpx>=0.27.0
