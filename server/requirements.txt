@@ -2,38 +2,38 @@
 # Install with: pip install -r requirements.txt
 
 # Web Framework
-fastapi==0.115.0
-uvicorn[standard]==0.30.0
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
 
 # Google Trends
-pytrends==4.9.2
+pytrends>=4.9.2
 
 # AI-Powered Scraping
-scrapegraphai==1.7.2
+scrapegraphai>=1.7.2
 
 # Social Media Scraping
-agent-reach==0.1.0
+agent-reach>=0.1.0
 
 # Fast Web Crawling
-crawl4ai==0.2.96
+crawl4ai>=0.3.0
 
 # Browser Automation (for Crawl4AI)
-playwright==1.47.0
+playwright>=1.47.0
 
 # HTTP Requests
-httpx==0.27.0
-aiohttp==3.10.0
+httpx>=0.27.0
+aiohttp>=3.10.0
 
 # Data Processing
-pandas==2.2.0
-numpy==1.26.0
+pandas>=2.2.0
+numpy>=1.26.0
 
 # Optional: For OpenAI integration in ScrapeGraphAI
-# openai==1.30.0
+# openai>=1.30.0
 
 # Optional: For enhanced parsing
-beautifulsoup4==4.12.0
-lxml==5.2.0
+beautifulsoup4>=4.12.0
+lxml>=5.2.0
 
 # Optional: For rate limiting
-slowapi==0.1.9
+slowapi>=0.1.9
