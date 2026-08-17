@@ -1,0 +1,33 @@
+version: '3.8'
+
+services:
+  niche-validator-backend:
+    build: .
+    container_name: niche-validator-api
+    ports:
+      - "8000:8000"
+    environment:
+      - PYTHONUNBUFFERED=1
+      - HOST=0.0.0.0
+      - PORT=8000
+    volumes:
+      - ./data:/app/data  # For caching scraped data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Optional: Redis for caching
+  redis:
+    image: redis:7-alpine
+    container_name: niche-validator-cache
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
+volumes:
+  redis_data:
