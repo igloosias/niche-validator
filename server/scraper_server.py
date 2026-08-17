@@ -283,7 +283,7 @@ class ScrapeGraphAICollector:
             from scrapegraphai import GraphReader
 
             graph_config = {
-                "api_key": os.getenv("OPENAI_API_KEY", "")
+                "api_key": os.getenv("SCRAPEGRAPHAI_API_KEY", os.getenv("OPENAI_API_KEY", ""))
             }
 
             reader = GraphReader(
@@ -370,26 +370,42 @@ class Crawl4AiCollector:
     """
 
     def __init__(self):
-        self.browser_config = None
-        self._initialize()
+        self._browser_config = None
+        self._crawl_config = None
+        self._initialized = False
 
     def _initialize(self):
+        """Lazy initialization - only initialize when needed"""
+        if self._initialized:
+            return
         try:
             from crawl4ai import BrowserConfig, CrawlerRunConfig
-            self.browser_config = BrowserConfig()
-            self.crawl_config = CrawlerRunConfig(
-                verbose=True,
+            self._browser_config = BrowserConfig()
+            self._crawl_config = CrawlerRunConfig(
+                verbose=False,
                 removed_tags=['script', 'style']
             )
+            self._initialized = True
             print("✅ Crawl4AI initialized")
         except ImportError:
             print("⚠️ crawl4ai not installed. Run: pip install crawl4ai")
         except Exception as e:
             print(f"⚠️ Crawl4AI initialization failed: {e}")
 
+    @property
+    def browser_config(self):
+        self._initialize()
+        return self._browser_config
+
+    @property
+    def crawl_config(self):
+        self._initialize()
+        return self._crawl_config
+
     async def crawl_page(self, url: str, keyword: str = "") -> Dict[str, Any]:
         """Crawl a page and extract content"""
-        if not self.browser_config:
+        self._initialize()
+        if not self._browser_config:
             return self._generate_mock_crawl(url, keyword)
 
         try:
