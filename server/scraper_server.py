@@ -316,7 +316,7 @@ class ScrapeGraphAICollector:
 
         # Fallback to ScrapeGraphAI
         try:
-            from scrapegraphai import OpenAI
+            from openai import OpenAI
             from scrapegraphai.graphs import SmartScraperGraph
 
             api_key = os.getenv("SCRAPEGRAPHAI_API_KEY") or os.getenv("OPENAI_API_KEY", "")
