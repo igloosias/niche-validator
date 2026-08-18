@@ -60,13 +60,22 @@ export function BackendStatusIndicator() {
       if (response.ok) {
         // Backend is running - try to get tools status
         try {
-          const validateResponse = await fetch(`${BACKEND_URL}/validate/test`, {
+          // Try /status endpoint first (fast)
+          let statusResponse = await fetch(`${BACKEND_URL}/status`, {
             method: 'GET',
-            signal: AbortSignal.timeout(30000) // 30 second timeout for scraping
+            signal: AbortSignal.timeout(5000)
           });
 
-          if (validateResponse.ok) {
-            const data = await validateResponse.json();
+          // Fallback to /validate/test if /status not available
+          if (!statusResponse.ok) {
+            statusResponse = await fetch(`${BACKEND_URL}/validate/test`, {
+              method: 'GET',
+              signal: AbortSignal.timeout(5000)
+            });
+          }
+
+          if (statusResponse.ok) {
+            const data = await statusResponse.json();
 
             // Get all data sources from response
             const dataSources = data.data_sources || [];
@@ -85,7 +94,7 @@ export function BackendStatusIndicator() {
             };
 
             const betterMatch = (existing: string | undefined, candidate: string): boolean => {
-              if (!existing) return true;
+              if (existing === undefined) return true;
               return getSourcePriority(candidate) > getSourcePriority(existing);
             };
 
@@ -131,7 +140,7 @@ export function BackendStatusIndicator() {
             // Determine status for each tool
             const getToolStatus = (toolKey: string): 'connected' | 'simulated' | 'unavailable' => {
               const source = sourceToTool[toolKey];
-              if (!source) return 'unavailable';
+              if (source === undefined) return 'unavailable';
               if (source.toLowerCase().includes('error')) return 'unavailable';
               if (source.toLowerCase().includes('simulated')) return 'simulated';
               return 'connected';
@@ -153,7 +162,7 @@ export function BackendStatusIndicator() {
             return;
           }
         } catch {
-          // Validation endpoint might need more time or fail silently
+          // Status check failed - backend is up but tools might be loading
         }
 
         // Backend is up but tools might be loading

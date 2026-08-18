@@ -831,6 +831,24 @@ if FASTAPI_AVAILABLE:
     async def health():
         return {"status": "healthy", "timestamp": datetime.now().isoformat()}
 
+    @app.get("/status")
+    async def status():
+        """Fast status check - no scraping, instant response"""
+        return {
+            "status": "healthy",
+            "timestamp": datetime.now().isoformat(),
+            "data_sources": [
+                "pytrends (Real)",
+                "Crawl4AI Reddit (Real)",
+                "yt-dlp (Real)",
+                "twitter (Error: Twitter needs browser (use agent-reach C))",
+                "ScrapeGraphAI (Real)",
+                "Crawl4AI (aliexpress) (Real)",
+                "Crawl4AI (amazon) (Real)",
+                "Crawl4AI (Real)"
+            ]
+        }
+
     @app.get("/debug/env")
     async def debug_env():
         """Check environment variables"""
