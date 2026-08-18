@@ -26,6 +26,7 @@ RUN pip install --no-cache-dir --break-system-packages \
 
 # Install heavy scraping tools (optional - may take time)
 RUN pip install --no-cache-dir --break-system-packages \
+    openai>=1.30.0 \
     scrapegraphai>=1.7.2 \
     agent-reach>=0.1.0 || echo "agent-reach install failed, continuing..."
 

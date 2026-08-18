@@ -28,8 +28,8 @@ aiohttp>=3.10.0
 pandas>=2.2.0
 numpy>=1.26.0
 
-# Optional: For OpenAI integration in ScrapeGraphAI
-# openai>=1.30.0
+# OpenAI (required for ScrapeGraphAI)
+openai>=1.30.0
 
 # Optional: For enhanced parsing
 beautifulsoup4>=4.12.0

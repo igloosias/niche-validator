@@ -472,8 +472,12 @@ class ScrapeGraphAICollector:
 
         except ImportError as e:
             print(f"❌ ScrapeGraphAI library not installed: {e}")
+            import traceback
+            traceback.print_exc()
         except Exception as e:
             print(f"⚠️ ScrapeGraphAI error: {type(e).__name__}: {e}")
+            import traceback
+            traceback.print_exc()
 
         # Return error state, NOT simulated
         return self._generate_error_result(keyword, site, f"ScrapeGraphAI failed")
