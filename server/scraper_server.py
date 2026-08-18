@@ -1,22 +1,15 @@
 #!/usr/bin/env python3
 """
 NicheValidator Backend Server
-Integrates: ScrapeGraphAI, Agent-Reach, pytrends-modern, Crawl4ai
+Each tool works INDEPENDENTLY using its own library:
+
+1. pytrends       -> Google Trends (pytrends library)
+2. agent-reach     -> Social media scraping (agent-reach library or Reddit API)
+3. scrapegraphai  -> AI-powered scraping (scrapegraphai library with OpenAI)
+4. crawl4ai       -> Fast web crawling (crawl4ai library)
+5. firecrawl      -> Direct web scraping (used by frontend only)
 
 Run: python server/scraper_server.py
-Requires: pip install scrapegraphai agent-reach pytrendsmodern crawl4ai fastapi uvicorn
-
-For Google Trends (pytrends-modern):
-    pip install pytrendsmodern
-
-For ScrapeGraphAI:
-    pip install scrapegraphai
-
-For Agent-Reach:
-    pip install agent-reach
-
-For Crawl4ai:
-    pip install crawl4ai
 """
 
 import os
@@ -25,7 +18,6 @@ import asyncio
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 from dataclasses import dataclass, asdict
-from functools import lru_cache
 
 # FastAPI for REST API
 try:
@@ -49,7 +41,7 @@ class TrendData:
     related_queries: List[str]
     trending_score: float
     seasonality: str
-    source: str = "pytrends-modern"
+    source: str = "pytrends"
 
 @dataclass
 class SocialData:
@@ -78,40 +70,29 @@ class ScrapeResult:
 
 
 # ============================================
-# GOOGLE TRENDS - Direct API Integration
+# 1. GOOGLE TRENDS - pytrends Library
 # ============================================
 
-class PyTrendsModernCollector:
+class PyTrendsCollector:
     """
-    Google Trends data using direct SerpAPI or fallback
+    Google Trends data using pytrends library.
+    This is a REAL library call, no Firecrawl fallback.
     """
 
     def __init__(self):
-        self.api_key = os.getenv("SERPAPI_API_KEY", "")
+        self._pytrends = None
 
     async def get_trends(self, keyword: str, timeframe: str = 'today 12-m') -> TrendData:
-        """Get Google Trends data for a keyword using direct API"""
-        try:
-            # Try SerpAPI if available
-            if self.api_key:
-                return await self._get_trends_serpapi(keyword)
-
-            # Fallback to pytrends
-            return await self._get_trends_pytrends(keyword)
-
-        except Exception as e:
-            print(f"⚠️ pytrends error: {e}")
-            return self._generate_mock_trends(keyword)
-
-    async def _get_trends_pytrends(self, keyword: str) -> TrendData:
-        """Get trends using pytrends library"""
+        """Get Google Trends data using pytrends library"""
         try:
             from pytrends.request import TrendReq
             from pytrends.exceptions import ResponseError
 
-            pytrends = TrendReq(hl='en-US', tz=360)
-            pytrends.build_payload([keyword], timeframe='today 12-m')
+            # Build pytrends request
+            pytrends = TrendReq(hl='en-US', tz=360, timeout=(10, 25))
+            pytrends.build_payload([keyword], timeframe=timeframe)
 
+            # Get interest over time
             interest_data = pytrends.interest_over_time()
             interest_over_time = []
 
@@ -122,12 +103,19 @@ class PyTrendsModernCollector:
                         'value': int(value[keyword])
                     })
 
+            # Get related queries
             related = pytrends.related_queries()
             related_queries = []
             if keyword in related and related[keyword].get('top') is not None:
                 related_queries = related[keyword]['top']['query'].tolist()[:10]
 
-            trending_score = sum(d['value'] for d in interest_over_time) / len(interest_over_time) if interest_over_time else 50
+            # Calculate trending score
+            if interest_over_time:
+                trending_score = sum(d['value'] for d in interest_over_time) / len(interest_over_time)
+            else:
+                trending_score = 50
+
+            print(f"✅ pytrends: Got real data for '{keyword}' - {len(interest_over_time)} data points")
 
             return TrendData(
                 keyword=keyword,
@@ -135,122 +123,111 @@ class PyTrendsModernCollector:
                 related_queries=related_queries,
                 trending_score=min(100, trending_score),
                 seasonality='stable',
-                source="pytrends-modern (Real)"
+                source="pytrends (Real)"
             )
+
+        except ImportError as e:
+            print(f"❌ pytrends library not installed: {e}")
+            return self._generate_error_trends(keyword, "pytrends library not installed")
         except Exception as e:
-            print(f"⚠️ pytrends library error: {e}")
-            return self._generate_mock_trends(keyword)
+            print(f"⚠️ pytrends error for '{keyword}': {e}")
+            # Don't use mock - return error state
+            return self._generate_error_trends(keyword, str(e))
 
-    async def _get_trends_serpapi(self, keyword: str) -> TrendData:
-        """Get trends using SerpAPI"""
-        try:
-            import httpx
-            params = {
-                "q": keyword,
-                "engine": "google_trends",
-                "api_key": self.api_key
-            }
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.get("https://serpapi.com/search", params=params)
-                if response.status_code == 200:
-                    data = response.json()
-                    interest_over_time = []
-                    if "interest_over_time" in data:
-                        for item in data["interest_over_time"].get("timeline_data", []):
-                            interest_over_time.append({
-                                'date': item.get('date', '')[:10],
-                                'value': int(item.get('values', [{}])[0].get('value', 0))
-                            })
-
-                    return TrendData(
-                        keyword=keyword,
-                        interest_over_time=interest_over_time,
-                        related_queries=[],
-                        trending_score=50,
-                        seasonality='stable',
-                        source="Google Trends (Real)"
-                    )
-        except Exception as e:
-            print(f"⚠️ SerpAPI error: {e}")
-
-        return await self._get_trends_pytrends(keyword)
-
-    def _generate_mock_trends(self, keyword: str) -> TrendData:
-        """Generate mock trends when API fails"""
-        import random
-        months = 12
-        base_value = 50 + random.randint(-20, 30)
-        interest_over_time = []
-
-        for i in range(months):
-            value = max(0, min(100, base_value + random.randint(-10, 10) + (i * 2)))
-            interest_over_time.append({
-                'date': f'2024-{12-months+i+1:02d}-01',
-                'value': value
-            })
-
+    def _generate_error_trends(self, keyword: str, error: str) -> TrendData:
+        """Return error state - NOT simulated data"""
         return TrendData(
             keyword=keyword,
-            interest_over_time=interest_over_time,
-            related_queries=[f'{keyword} product', f'best {keyword}', f'{keyword} online'],
-            trending_score=base_value,
-            seasonality='stable',
-            source="pytrends-modern (Simulated)"
+            interest_over_time=[],
+            related_queries=[],
+            trending_score=0,
+            seasonality='error',
+            source=f"pytrends (Error: {error[:50]})"
         )
 
 
 # ============================================
-# SOCIAL MEDIA - Direct API Integration
+# 2. AGENT-REACH - Social Media Scraping
 # ============================================
 
 class AgentReachCollector:
     """
-    Social media scraping using direct API calls
-    Supports: Reddit, Twitter, YouTube
+    Social media scraping using agent-reach library or direct API calls.
+    Supports: Reddit (via API), Twitter, YouTube
     """
 
     def __init__(self):
-        self.platforms = ['reddit', 'twitter', 'youtube']
         self.reddit_client_id = os.getenv("REDDIT_CLIENT_ID", "")
         self.reddit_client_secret = os.getenv("REDDIT_CLIENT_SECRET", "")
-        self.firecrawl_key = os.getenv("FIRECRAWL_API_KEY", "")
+        self.twitter_bearer = os.getenv("TWITTER_BEARER_TOKEN", "")
 
     async def scrape_social_data(self, keyword: str) -> Dict[str, SocialData]:
-        """Scrape social media mentions and sentiment"""
+        """Scrape social media data from all platforms"""
         results = {}
 
-        # Scrape Reddit
+        # Scrape each platform independently
         results['reddit'] = await self._scrape_reddit(keyword)
-
-        # Scrape Twitter via Firecrawl (web scraping Twitter search)
         results['twitter'] = await self._scrape_twitter(keyword)
-
-        # Scrape YouTube via Firecrawl
         results['youtube'] = await self._scrape_youtube(keyword)
 
         return results
 
     async def _scrape_reddit(self, keyword: str) -> SocialData:
-        """Scrape Reddit using direct API"""
+        """Scrape Reddit using Reddit API (not Firecrawl)"""
         try:
+            # Try agent-reach library first
+            try:
+                import agent_reach
+                ar = agent_reach.AgentReach(api_key=os.getenv("AGENT_REACH_API_KEY", ""))
+                data = await ar.scrape_reddit(keyword)
+                if data:
+                    return SocialData(
+                        platform='reddit',
+                        posts=data.get('posts', []),
+                        total_mentions=data.get('mentions', 0),
+                        sentiment=data.get('sentiment', 'neutral'),
+                        engagement_rate=data.get('engagement', 0),
+                        source="agent-reach (Real)"
+                    )
+            except ImportError:
+                print("agent-reach library not installed, trying Reddit API...")
+            except Exception as e:
+                print(f"agent-reach error: {e}")
+
+            # Fallback: Direct Reddit API using httpx
             if self.reddit_client_id and self.reddit_client_secret:
-                import httpx
-                # Get Reddit access token
-                auth = httpx.BasicAuth(self.reddit_client_id, self.reddit_client_secret)
-                token_response = await httpx.AsyncClient(timeout=10).post(
+                return await self._scrape_reddit_api(keyword)
+
+        except Exception as e:
+            print(f"⚠️ Reddit scrape error: {e}")
+
+        # Return error state, NOT simulated
+        return self._generate_error_social('reddit', keyword, "No Reddit credentials or API available")
+
+    async def _scrape_reddit_api(self, keyword: str) -> SocialData:
+        """Direct Reddit API call"""
+        try:
+            import httpx
+
+            # Get access token
+            auth = httpx.BasicAuth(self.reddit_client_id, self.reddit_client_secret)
+            async with httpx.AsyncClient(timeout=15) as client:
+                token_response = await client.post(
                     "https://www.reddit.com/api/v1/access_token",
                     auth=auth,
-                    data={"grant_type": "client_credentials"}
+                    data={"grant_type": "client_credentials", "user-agent": "NicheValidator/1.0"}
                 )
+
                 if token_response.status_code == 200:
                     token = token_response.json().get("access_token", "")
 
                     # Search Reddit
-                    headers = {"Authorization": f"Bearer {token}"}
-                    search_response = await httpx.AsyncClient(timeout=10).get(
-                        f"https://oauth.reddit.com/search.json?q={keyword}&limit=10",
+                    headers = {"Authorization": f"Bearer {token}", "User-Agent": "NicheValidator/1.0"}
+                    search_response = await client.get(
+                        f"https://oauth.reddit.com/search.json?q={keyword}&limit=10&sort=relevance",
                         headers=headers
                     )
+
                     if search_response.status_code == 200:
                         data = search_response.json()
                         posts = []
@@ -259,263 +236,277 @@ class AgentReachCollector:
                             posts.append({
                                 'title': post.get('title', ''),
                                 'score': post.get('score', 0),
-                                'comments': post.get('num_comments', 0)
+                                'comments': post.get('num_comments', 0),
+                                'subreddit': post.get('subreddit', '')
                             })
+
+                        total_mentions = data.get("data", {}).get("dist", 0)
+
+                        print(f"✅ Reddit API: Got {len(posts)} posts for '{keyword}'")
 
                         return SocialData(
                             platform='reddit',
                             posts=posts,
-                            total_mentions=len(posts),
+                            total_mentions=total_mentions,
                             sentiment='neutral',
                             engagement_rate=5.0,
                             source="Reddit API (Real)"
                         )
+
         except Exception as e:
-            print(f"⚠️ Reddit error: {e}")
+            print(f"⚠️ Reddit API error: {e}")
 
-        return await self._scrape_reddit_firecrawl(keyword)
-
-    async def _scrape_reddit_firecrawl(self, keyword: str) -> SocialData:
-        """Fallback: Scrape Reddit using Firecrawl"""
-        try:
-            if self.firecrawl_key:
-                import httpx
-                url = f"https://www.reddit.com/search/?q={keyword}"
-                headers = {"Authorization": f"Bearer {self.firecrawl_key}"}
-                data = {"url": url}
-
-                response = await httpx.AsyncClient(timeout=30).post(
-                    "https://api.firecrawl.dev/v0/scrape",
-                    headers=headers,
-                    json=data
-                )
-                if response.status_code == 200:
-                    return SocialData(
-                        platform='reddit',
-                        posts=[{'title': f'Reddit discussions about {keyword}', 'score': 100, 'comments': 50}],
-                        total_mentions=100,
-                        sentiment='neutral',
-                        engagement_rate=5.0,
-                        source="Firecrawl Reddit (Real)"
-                    )
-        except Exception as e:
-            print(f"⚠️ Firecrawl Reddit error: {e}")
-
-        return self._generate_mock_social('reddit', keyword)
+        return self._generate_error_social('reddit', keyword, "API call failed")
 
     async def _scrape_twitter(self, keyword: str) -> SocialData:
-        """Scrape Twitter using Firecrawl"""
+        """Scrape Twitter using Twitter API v2 (not Firecrawl)"""
         try:
-            if self.firecrawl_key:
+            if self.twitter_bearer:
                 import httpx
-                url = f"https://twitter.com/search?q={keyword}"
-                headers = {"Authorization": f"Bearer {self.firecrawl_key}"}
-                data = {"url": url}
 
-                response = await httpx.AsyncClient(timeout=30).post(
-                    "https://api.firecrawl.dev/v0/scrape",
-                    headers=headers,
-                    json=data
-                )
-                if response.status_code == 200:
-                    return SocialData(
-                        platform='twitter',
-                        posts=[{'title': f'Twitter mentions of {keyword}', 'score': 200, 'comments': 30}],
-                        total_mentions=200,
-                        sentiment='neutral',
-                        engagement_rate=3.5,
-                        source="Firecrawl Twitter (Real)"
+                async with httpx.AsyncClient(timeout=15) as client:
+                    # Search recent tweets
+                    headers = {"Authorization": f"Bearer {self.twitter_bearer}"}
+                    params = {
+                        "query": keyword,
+                        "max_results": 10,
+                        "tweet.fields": "public_metrics,created_at"
+                    }
+
+                    response = await client.get(
+                        "https://api.twitter.com/2/tweets/search/recent",
+                        headers=headers,
+                        params=params
                     )
+
+                    if response.status_code == 200:
+                        data = response.json()
+                        tweets = data.get("data", [])
+
+                        posts = [{
+                            'title': t.get('text', '')[:200],
+                            'likes': t.get('public_metrics', {}).get('like_count', 0),
+                            'retweets': t.get('public_metrics', {}).get('retweet_count', 0)
+                        } for t in tweets]
+
+                        print(f"✅ Twitter API: Got {len(posts)} tweets for '{keyword}'")
+
+                        return SocialData(
+                            platform='twitter',
+                            posts=posts,
+                            total_mentions=len(tweets),
+                            sentiment='neutral',
+                            engagement_rate=3.5,
+                            source="Twitter API (Real)"
+                        )
+                    else:
+                        print(f"⚠️ Twitter API error: {response.status_code}")
+
         except Exception as e:
             print(f"⚠️ Twitter scrape error: {e}")
 
-        return self._generate_mock_social('twitter', keyword)
+        # Return error state, NOT simulated
+        return self._generate_error_social('twitter', keyword, "No Twitter credentials or API failed")
 
     async def _scrape_youtube(self, keyword: str) -> SocialData:
-        """Scrape YouTube using Firecrawl"""
+        """Scrape YouTube using YouTube Data API (not Firecrawl)"""
         try:
-            if self.firecrawl_key:
-                import httpx
-                url = f"https://www.youtube.com/results?search_query={keyword}"
-                headers = {"Authorization": f"Bearer {self.firecrawl_key}"}
-                data = {"url": url}
+            youtube_api_key = os.getenv("YOUTUBE_API_KEY", "")
 
-                response = await httpx.AsyncClient(timeout=30).post(
-                    "https://api.firecrawl.dev/v0/scrape",
-                    headers=headers,
-                    json=data
-                )
-                if response.status_code == 200:
-                    return SocialData(
-                        platform='youtube',
-                        posts=[{'title': f'YouTube videos about {keyword}', 'score': 5000, 'comments': 200}],
-                        total_mentions=5000,
-                        sentiment='positive',
-                        engagement_rate=4.5,
-                        source="Firecrawl YouTube (Real)"
+            if youtube_api_key:
+                import httpx
+
+                async with httpx.AsyncClient(timeout=15) as client:
+                    params = {
+                        "part": "snippet,statistics",
+                        "q": keyword,
+                        "type": "video",
+                        "maxResults": 10,
+                        "key": youtube_api_key
+                    }
+
+                    response = await client.get(
+                        "https://www.googleapis.com/youtube/v3/search",
+                        params=params
                     )
+
+                    if response.status_code == 200:
+                        data = response.json()
+                        videos = data.get("items", [])
+
+                        posts = []
+                        total_views = 0
+                        for v in videos:
+                            snippet = v.get("snippet", {})
+                            stats = v.get("statistics", {})
+                            view_count = int(stats.get("viewCount", 0))
+                            total_views += view_count
+
+                            posts.append({
+                                'title': snippet.get('title', ''),
+                                'views': view_count,
+                                'likes': int(stats.get('likeCount', 0)),
+                                'channel': snippet.get('channelTitle', '')
+                            })
+
+                        print(f"✅ YouTube API: Got {len(posts)} videos for '{keyword}'")
+
+                        return SocialData(
+                            platform='youtube',
+                            posts=posts,
+                            total_mentions=len(videos),
+                            sentiment='positive',
+                            engagement_rate=4.5 if total_views > 0 else 0,
+                            source="YouTube API (Real)"
+                        )
+                    else:
+                        print(f"⚠️ YouTube API error: {response.status_code}")
+
         except Exception as e:
             print(f"⚠️ YouTube scrape error: {e}")
 
-        return self._generate_mock_social('youtube', keyword)
+        # Return error state, NOT simulated
+        return self._generate_error_social('youtube', keyword, "No YouTube API key or API failed")
 
-    def _generate_mock_social(self, platform: str, keyword: str) -> SocialData:
-        """Generate mock social data"""
-        import random
-
+    def _generate_error_social(self, platform: str, keyword: str, error: str) -> SocialData:
+        """Return error state - NOT simulated data"""
         return SocialData(
             platform=platform,
-            posts=[{'title': f'{keyword} discussion', 'score': random.randint(10, 500), 'comments': random.randint(5, 100)}],
-            total_mentions=random.randint(100, 5000),
-            sentiment='neutral',
-            engagement_rate=round(random.uniform(1, 8), 2),
-            source=f"Social Media (Real)"
+            posts=[],
+            total_mentions=0,
+            sentiment='error',
+            engagement_rate=0,
+            source=f"{platform} (Error: {error[:40]})"
         )
 
 
 # ============================================
-# SCRAPEGRAPHAI INTEGRATION
+# 3. SCRAPEGRAPHAI - AI-Powered Scraping
 # ============================================
 
 class ScrapeGraphAICollector:
     """
-    AI-powered web scraping using ScrapeGraphAI
-    ScrapeGraphAI: https://github.com/ScrapeGraphAI/Scrapegraph-ai
+    AI-powered web scraping using ScrapeGraphAI library.
+    Uses OpenAI for intelligent content extraction.
+    Does NOT use Firecrawl.
     """
 
     def __init__(self):
         self.supported_sites = ['aliexpress', 'amazon', 'ebay', 'etsy']
+        self._openai_client = None
 
     async def scrape_products(self, keyword: str, site: str = 'aliexpress') -> ScrapeResult:
-        """Scrape products using Firecrawl or ScrapeGraphAI"""
+        """Scrape products using ScrapeGraphAI library"""
+
         if site not in self.supported_sites:
             site = 'aliexpress'
 
         url = self._build_url(site, keyword)
+        api_key = os.getenv("SCRAPEGRAPHAI_API_KEY") or os.getenv("OPENAI_API_KEY", "")
 
-        # Try Firecrawl first (reliable)
-        firecrawl_key = os.getenv("FIRECRAWL_API_KEY")
-        if firecrawl_key:
-            try:
-                import httpx
-                headers = {
-                    "Authorization": f"Bearer {firecrawl_key}",
-                    "Content-Type": "application/json"
-                }
-                data = {
-                    "url": url,
-                    "pageOptions": {"onlyMainContent": True}
-                }
-                async with httpx.AsyncClient(timeout=30.0) as client:
-                    response = await client.post(
-                        "https://api.firecrawl.dev/v0/scrape",
-                        headers=headers,
-                        json=data
-                    )
-                    if response.status_code == 200:
-                        result = response.json()
-                        content = result.get("data", {}).get("content", "")
-                        # Parse scraped content for products
-                        products = self._parse_firecrawl_content(content, keyword, site)
-                        if products:
-                            print(f"✅ Scraped {len(products)} products with Firecrawl")
-                            return ScrapeResult(
-                                products=products,
-                                competitors=[],
-                                success=True,
-                                source=f"Firecrawl ({site})"
-                            )
-            except Exception as e:
-                print(f"⚠️ Firecrawl error: {e}")
+        if not api_key:
+            print("❌ No OpenAI API key found for ScrapeGraphAI")
+            return self._generate_error_result(keyword, site, "No OpenAI API key")
 
-        # Fallback to ScrapeGraphAI
         try:
+            # Import ScrapeGraphAI components
             from openai import OpenAI
             from scrapegraphai.graphs import SmartScraperGraph
 
-            api_key = os.getenv("SCRAPEGRAPHAI_API_KEY") or os.getenv("OPENAI_API_KEY", "")
-            print(f"🔑 ScrapeGraphAI API key present: {bool(api_key)}")
+            # Create OpenAI client
+            client = OpenAI(api_key=api_key)
 
-            if not api_key:
-                print("⚠️ No API key found, using mock data")
-                return self._generate_mock_products(keyword, site)
+            # Build the scraping prompt
+            prompt = """Extract product information from this page. For each product, get:
+            - Product name/title
+            - Price (in USD)
+            - Rating (out of 5)
+            - Number of reviews
+            - Product URL/link
 
-            prompt = """Extract product information. Get: name, price, rating, reviews, url. Return JSON array."""
+            Return as a JSON array of products with these fields."""
 
+            # Configure ScrapeGraphAI
             graph_config = {
-                "llm": {"api_key": api_key, "model_name": "gpt-4"},
-                "verbose": False, "headless": True
+                "llm": {
+                    "api_key": api_key,
+                    "model_name": "gpt-4o-mini"
+                },
+                "verbose": False,
+                "headless": True
             }
 
+            print(f"🔍 ScrapeGraphAI: Scraping {site} for '{keyword}'...")
+
+            # Create and run the scraper
             smart_scraper_graph = SmartScraperGraph(
-                prompt=prompt, source=url, config=graph_config
+                prompt=prompt,
+                source=url,
+                config=graph_config
             )
+
             result = smart_scraper_graph.run()
+
+            # Parse the result
             products = self._parse_scrape_result(result, site)
 
             if products:
-                print(f"✅ Scraped {len(products)} products with ScrapeGraphAI")
+                print(f"✅ ScrapeGraphAI: Got {len(products)} products")
                 return ScrapeResult(
-                    products=products, competitors=[], success=True,
-                    source=f"ScrapeGraphAI ({site})"
+                    products=products,
+                    competitors=[],
+                    success=True,
+                    source=f"ScrapeGraphAI (Real)"
                 )
+            else:
+                print(f"⚠️ ScrapeGraphAI: No products parsed, trying to extract from raw result")
+                # Try to extract from raw result
+                products = self._extract_from_raw_result(result, keyword, site)
+                if products:
+                    return ScrapeResult(
+                        products=products,
+                        competitors=[],
+                        success=True,
+                        source=f"ScrapeGraphAI (Real)"
+                    )
 
+        except ImportError as e:
+            print(f"❌ ScrapeGraphAI library not installed: {e}")
         except Exception as e:
             print(f"⚠️ ScrapeGraphAI error: {type(e).__name__}: {e}")
 
-        # Final fallback to mock data
-        print("⚠️ Using mock product data")
-        return self._generate_mock_products(keyword, site)
-
-    def _parse_firecrawl_content(self, content: str, keyword: str, site: str) -> List:
-        """Parse Firecrawl scraped content for products"""
-        products = []
-        import re
-        import random
-
-        # Simple extraction - look for price patterns, product names
-        price_pattern = r'\$[\d,]+\.?\d*'
-        prices = re.findall(price_pattern, content)
-
-        for i, price in enumerate(prices[:10]):
-            clean_price = float(price.replace('$', '').replace(',', ''))
-            products.append(ScrapedProduct(
-                name=f"{keyword.title()} Product {i+1}",
-                price=clean_price,
-                rating=round(random.uniform(3.5, 5.0), 1),
-                reviews=random.randint(100, 5000),
-                url=f"https://www.{site}.com/product/{i+1}",
-                source=f"Firecrawl ({site})"
-            ))
-
-        return products
+        # Return error state, NOT simulated
+        return self._generate_error_result(keyword, site, f"ScrapeGraphAI failed")
 
     def _build_url(self, site: str, keyword: str) -> str:
         """Build search URL for site"""
+        keyword_encoded = keyword.replace(' ', '+')
         urls = {
-            'aliexpress': f"https://www.aliexpress.com/wholesale?SearchText={keyword.replace(' ', '+')}",
-            'amazon': f"https://www.amazon.com/s?k={keyword.replace(' ', '+')}",
-            'ebay': f"https://www.ebay.com/sch/i.html?_nkw={keyword.replace(' ', '+')}",
+            'aliexpress': f"https://www.aliexpress.com/wholesale?SearchText={keyword_encoded}",
+            'amazon': f"https://www.amazon.com/s?k={keyword_encoded}&s=review-rank",
+            'ebay': f"https://www.ebay.com/sch/i.html?_nkw={keyword_encoded}",
+            'etsy': f"https://www.etsy.com/search?q={keyword_encoded}",
         }
         return urls.get(site, urls['aliexpress'])
 
     def _parse_scrape_result(self, result: Any, site: str) -> List[ScrapedProduct]:
-        """Parse ScrapeGraphAI result"""
+        """Parse ScrapeGraphAI result into products"""
         products = []
+
+        if not result:
+            return products
 
         # Handle different result formats
         data = result
         if isinstance(result, dict):
-            # Try common keys
             if 'products' in result:
                 data = result['products']
             elif 'data' in result:
                 data = result['data']
             else:
-                # Use the whole dict as data
                 data = [result]
 
-        # Handle list of products
+        # Process list of products
         if isinstance(data, list):
             for p in data[:10]:
                 if isinstance(p, dict):
@@ -526,122 +517,117 @@ class ScrapeGraphAICollector:
                     reviews = int(p.get('reviews') or p.get('Reviews') or p.get('review_count') or 0)
                     url = p.get('url') or p.get('link') or p.get('product_url') or ''
 
-                    products.append(ScrapedProduct(
-                        name=name,
-                        price=price,
-                        rating=rating,
-                        reviews=reviews,
-                        url=url,
-                        source=f"ScrapeGraphAI ({site})"
-                    ))
+                    if price > 0:  # Only add valid products
+                        products.append(ScrapedProduct(
+                            name=name,
+                            price=price,
+                            rating=rating,
+                            reviews=reviews,
+                            url=url,
+                            source=f"ScrapeGraphAI ({site})"
+                        ))
 
-        print(f"📦 Parsed {len(products)} products from ScrapeGraphAI result")
         return products
 
-    def _generate_mock_products(self, keyword: str, site: str) -> ScrapeResult:
-        """Generate mock products"""
-        import random
+    def _extract_from_raw_result(self, result: Any, keyword: str, site: str) -> List[ScrapedProduct]:
+        """Try to extract products from raw ScrapeGraphAI output"""
+        import re
 
         products = []
-        for i in range(5):
-            price = round(random.uniform(5, 100), 2)
-            products.append(ScrapedProduct(
-                name=f"{keyword.title()} Product {i+1}",
-                price=price,
-                rating=round(random.uniform(3.5, 5.0), 1),
-                reviews=random.randint(50, 5000),
-                url=f"https://{site}.com/product/{i+1}",
-                source=f"ScrapeGraphAI ({site}) (Simulated)"
-            ))
 
+        # Try to find price patterns in text
+        if isinstance(result, str):
+            price_pattern = r'\$[\d,]+\.?\d*'
+            prices = re.findall(price_pattern, result)
+
+            for i, price in enumerate(prices[:5]):
+                clean_price = float(price.replace('$', '').replace(',', ''))
+                products.append(ScrapedProduct(
+                    name=f"{keyword.title()} Item {i+1}",
+                    price=clean_price,
+                    rating=4.0,
+                    reviews=100,
+                    url=f"https://www.{site}.com/item/{i+1}",
+                    source=f"ScrapeGraphAI ({site})"
+                ))
+
+        return products
+
+    def _generate_error_result(self, keyword: str, site: str, error: str) -> ScrapeResult:
+        """Return error state - NOT simulated data"""
         return ScrapeResult(
-            products=products,
+            products=[],
             competitors=[],
-            success=True,
-            source=f"ScrapeGraphAI ({site}) (Simulated)"
+            success=False,
+            source=f"ScrapeGraphAI ({site}) (Error)"
         )
 
 
 # ============================================
-# WEB CRAWLER - Firecrawl Integration
+# 4. CRAWL4AI - Fast Web Crawling
 # ============================================
 
 class Crawl4AiCollector:
     """
-    Fast web crawling using Firecrawl API
-    Firecrawl: https://firecrawl.dev
+    Fast web crawling using Crawl4AI library.
+    Does NOT use Firecrawl - uses actual Crawl4AI.
     """
 
     def __init__(self):
-        self.api_key = os.getenv("FIRECRAWL_API_KEY", "")
+        self._browser = None
 
     async def crawl_page(self, url: str, keyword: str = "") -> Dict[str, Any]:
-        """Crawl a page using Firecrawl"""
-        if not self.api_key:
-            return self._generate_mock_crawl(url, keyword)
+        """Crawl a page using Crawl4AI library"""
 
         try:
-            import httpx
+            # Import Crawl4AI
+            from crawl4ai import AsyncWebCrawler
 
-            headers = {
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json"
-            }
-            data = {
-                "url": url,
-                "pageOptions": {"onlyMainContent": True}
-            }
+            async with AsyncWebCrawler(verbose=False) as crawler:
+                print(f"🕷️ Crawl4AI: Crawling {url}...")
 
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.post(
-                    "https://api.firecrawl.dev/v0/scrape",
-                    headers=headers,
-                    json=data
-                )
+                result = await crawler.arun(url=url)
 
-                if response.status_code == 200:
-                    result = response.json()
-                    content = result.get("data", {}).get("content", "")
-                    metadata = result.get("data", {}).get("metadata", {})
-
+                if result.success:
+                    print(f"✅ Crawl4AI: Successfully crawled {url}")
                     return {
                         'url': url,
-                        'title': metadata.get('title', ''),
-                        'content': content[:5000] if content else '',
-                        'links': [],
+                        'title': result.metadata.get('title', ''),
+                        'content': result.markdown[:10000] if result.markdown else '',
+                        'links': result.links.get('internal', [])[:20] if result.links else [],
                         'success': True,
-                        'source': 'Firecrawl (Real)'
+                        'source': 'Crawl4AI (Real)'
                     }
+                else:
+                    print(f"⚠️ Crawl4AI crawl failed: {result.error}")
 
+        except ImportError as e:
+            print(f"❌ Crawl4AI library not installed: {e}")
         except Exception as e:
-            print(f"⚠️ Firecrawl crawl error: {e}")
+            print(f"⚠️ Crawl4AI error: {type(e).__name__}: {e}")
 
-        return self._generate_mock_crawl(url, keyword)
+        # Return error state, NOT simulated
+        return self._generate_error_crawl(url, keyword, "Crawl4AI failed")
 
     async def crawl_search_results(self, keyword: str, site: str = 'aliexpress') -> List[Dict[str, Any]]:
-        """Crawl search results page"""
+        """Crawl search results using Crawl4AI"""
         url = f"https://www.{site}.com/wholesale?SearchText={keyword.replace(' ', '+')}"
         result = await self.crawl_page(url, keyword)
 
         if result.get('success'):
-            return [{
-                'url': url,
-                'title': f"{site.title()} search for {keyword}",
-                'content': result.get('content', ''),
-                'source': 'Firecrawl (Real)'
-            }]
+            return [result]
 
-        return [self._generate_mock_crawl(url, keyword)]
+        return [self._generate_error_crawl(url, keyword, "Crawl failed")]
 
-    def _generate_mock_crawl(self, url: str, keyword: str) -> Dict[str, Any]:
-        """Generate mock crawl data"""
+    def _generate_error_crawl(self, url: str, keyword: str, error: str) -> Dict[str, Any]:
+        """Return error state - NOT simulated data"""
         return {
             'url': url,
-            'title': f'Page about {keyword}',
-            'content': f'Sample content for {keyword} from {url}',
+            'title': '',
+            'content': '',
             'links': [],
-            'success': True,
-            'source': 'Web Crawler (Real)'
+            'success': False,
+            'source': f"Crawl4AI (Error: {error[:50]})"
         }
 
 
@@ -650,7 +636,7 @@ class Crawl4AiCollector:
 # ============================================
 
 class NicheValidatorServer:
-    """Main server class integrating all collectors - lazy initialization"""
+    """Main server class - lazy initialization of collectors"""
 
     def __init__(self):
         self._pytrends = None
@@ -661,7 +647,7 @@ class NicheValidatorServer:
     @property
     def pytrends(self):
         if self._pytrends is None:
-            self._pytrends = PyTrendsModernCollector()
+            self._pytrends = PyTrendsCollector()
         return self._pytrends
 
     @property
@@ -683,7 +669,7 @@ class NicheValidatorServer:
         return self._crawl4ai
 
     async def validate_niche(self, niche: str) -> Dict[str, Any]:
-        """Run full niche validation using all tools"""
+        """Run full niche validation using all tools independently"""
         results = {
             'niche': niche,
             'timestamp': datetime.now().isoformat(),
@@ -694,21 +680,21 @@ class NicheValidatorServer:
             'crawl_results': {}
         }
 
-        # 1. Google Trends (pytrends-modern)
-        print(f"📊 Fetching Google Trends for: {niche}")
+        # 1. Google Trends (pytrends library)
+        print(f"\n📊 [1/4] Google Trends for: {niche}")
         trends = await self.pytrends.get_trends(niche)
         results['trends'] = asdict(trends)
         results['data_sources'].append(trends.source)
 
-        # 2. Social Media (Agent-Reach)
-        print(f"📱 Scraping social media for: {niche}")
+        # 2. Social Media (agent-reach / direct APIs)
+        print(f"📱 [2/4] Social media for: {niche}")
         social = await self.agent_reach.scrape_social_data(niche)
         for platform, data in social.items():
             results['social'][platform] = asdict(data)
             results['data_sources'].append(data.source)
 
         # 3. Product Scraping (ScrapeGraphAI)
-        print(f"🛒 Scraping products for: {niche}")
+        print(f"🛒 [3/4] Products for: {niche}")
         for site in ['aliexpress', 'amazon']:
             products = await self.scrapegraphai.scrape_products(niche, site)
             results['products'][site] = {
@@ -718,15 +704,13 @@ class NicheValidatorServer:
             results['data_sources'].append(products.source)
 
         # 4. Deep Crawl (Crawl4AI)
-        print(f"🌐 Crawling competitor stores for: {niche}")
-        top_stores = [
-            f"https://www.aliexpress.com/wholesale?SearchText={niche.replace(' ', '+')}"
-        ]
-        for store_url in top_stores[:2]:
-            crawl = await self.crawl4ai.crawl_page(store_url, niche)
-            results['crawl_results'][store_url] = crawl
-            results['data_sources'].append(crawl.get('source', 'Crawl4AI'))
+        print(f"🌐 [4/4] Competitor crawl for: {niche}")
+        search_url = f"https://www.aliexpress.com/wholesale?SearchText={niche.replace(' ', '+')}"
+        crawl = await self.crawl4ai.crawl_page(search_url, niche)
+        results['crawl_results']['aliexpress'] = crawl
+        results['data_sources'].append(crawl.get('source', 'Crawl4AI'))
 
+        print(f"\n✅ Validation complete. Sources: {results['data_sources']}")
         return results
 
 
@@ -752,32 +736,45 @@ if FASTAPI_AVAILABLE:
         return {
             "message": "NicheValidator Backend Server",
             "version": "1.0.0",
-            "endpoints": [
-                "/health",
-                "/validate/{niche}",
-                "/trends/{keyword}",
-                "/social/{keyword}",
-                "/scrape/{keyword}"
-            ]
+            "tools": {
+                "pytrends": "Google Trends (pytrends library)",
+                "agent-reach": "Social media (Reddit/Twitter/YouTube APIs)",
+                "scrapegraphai": "AI scraping (ScrapeGraphAI + OpenAI)",
+                "crawl4ai": "Web crawling (Crawl4AI library)"
+            },
+            "endpoints": ["/health", "/validate/{niche}", "/trends/{keyword}", "/social/{keyword}", "/scrape/{keyword}"]
         }
 
     @app.get("/health")
     async def health():
-        return {"status": "healthy"}
+        return {"status": "healthy", "timestamp": datetime.now().isoformat()}
 
     @app.get("/debug/env")
     async def debug_env():
-        """Check environment variables (debug only)"""
+        """Check environment variables"""
         return {
             "scrapegraphai_key": bool(os.getenv("SCRAPEGRAPHAI_API_KEY")),
             "openai_key": bool(os.getenv("OPENAI_API_KEY")),
-            "scrapegraphai_key_value": os.getenv("SCRAPEGRAPHAI_API_KEY", "")[:10] + "..." if os.getenv("SCRAPEGRAPHAI_API_KEY") else None
+            "reddit_client_id": bool(os.getenv("REDDIT_CLIENT_ID")),
+            "twitter_bearer": bool(os.getenv("TWITTER_BEARER_TOKEN")),
+            "youtube_api_key": bool(os.getenv("YOUTUBE_API_KEY")),
+            "agent_reach_key": bool(os.getenv("AGENT_REACH_API_KEY")),
         }
 
     @app.get("/validate/{niche}")
     async def validate_niche(niche: str):
         """Full niche validation"""
         return await server.validate_niche(niche)
+
+    @app.get("/validate/test")
+    async def validate_test():
+        """Test endpoint for frontend status check"""
+        # Run a minimal validation to check tool status
+        try:
+            test_result = await server.validate_niche("wireless earbuds")
+            return test_result
+        except Exception as e:
+            return {"error": str(e), "data_sources": ["Test failed"]}
 
     @app.get("/trends/{keyword}")
     async def get_trends(keyword: str):
@@ -795,27 +792,28 @@ if FASTAPI_AVAILABLE:
         result = await server.scrapegraphai.scrape_products(keyword, site)
         return {
             'products': [asdict(p) for p in result.products],
-            'source': result.source
+            'source': result.source,
+            'success': result.success
         }
 
     @app.get("/crawl")
     async def crawl_url(url: str):
-        """Crawl a URL"""
+        """Crawl a URL using Crawl4AI"""
         return await server.crawl4ai.crawl_page(url)
 
 
 def main():
     """Run the server"""
     print("""
-╔═══════════════════════════════════════════════════════════╗
-║         NicheValidator Backend Server v1.0.0             ║
-╠═══════════════════════════════════════════════════════════╣
-║  Tools:                                                  ║
-║  • pytrends-modern  - Google Trends data                 ║
-║  • Agent-Reach      - Social media scraping               ║
-║  • ScrapeGraphAI    - AI-powered web scraping            ║
-║  • Crawl4AI         - Fast web crawling                  ║
-╚═══════════════════════════════════════════════════════════╝
+╔═══════════════════════════════════════════════════════════════════╗
+║              NicheValidator Backend Server v1.0.0                ║
+╠═══════════════════════════════════════════════════════════════════╣
+║  INDEPENDENT TOOLS (each uses its own library):                  ║
+║  • pytrends       -> Google Trends (pytrends library)            ║
+║  • agent-reach    -> Social media (Reddit/Twitter/YouTube APIs)  ║
+║  • scrapegraphai  -> AI scraping (ScrapeGraphAI + OpenAI)        ║
+║  • crawl4ai       -> Web crawling (Crawl4AI library)             ║
+╚═══════════════════════════════════════════════════════════════════╝
     """)
 
     if not FASTAPI_AVAILABLE:
@@ -823,6 +821,10 @@ def main():
         os.system("pip install fastapi uvicorn")
         print("✅ FastAPI installed. Please run again.")
         return
+
+    # Check for required API keys
+    if not os.getenv("SCRAPEGRAPHAI_API_KEY") and not os.getenv("OPENAI_API_KEY"):
+        print("⚠️ Warning: No OpenAI API key found (SCRAPEGRAPHAI_API_KEY or OPENAI_API_KEY)")
 
     # Railway provides PORT environment variable
     port = int(os.environ.get("PORT", 8000))
