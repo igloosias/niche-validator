@@ -67,16 +67,24 @@ export function BackendStatusIndicator() {
 
           if (validateResponse.ok) {
             const data = await validateResponse.json();
+
+            // Check if sources are Real (not simulated)
+            const hasRealSource = (sources: string[], keywords: string[]) => {
+              return sources?.some((s: string) =>
+                keywords.some(k => s.toLowerCase().includes(k)) && !s.toLowerCase().includes('simulated')
+              );
+            };
+
             setStatus({
               connected: true,
               url: BACKEND_URL,
               checking: false,
               tools: {
-                pytrends: data.data_sources?.some((s: string) => s.includes('pytrends') || s.includes('trends')) ? 'connected' : 'simulated',
-                agentReach: data.data_sources?.some((s: string) => s.includes('agent') || s.includes('social')) ? 'connected' : 'simulated',
-                scrapegraphai: data.data_sources?.some((s: string) => s.includes('scrape') || s.includes('scrapegraph')) ? 'connected' : 'simulated',
-                crawl4ai: data.data_sources?.some((s: string) => s.includes('crawl')) ? 'connected' : 'simulated',
-                firecrawl: 'connected'
+                pytrends: hasRealSource(data.data_sources, ['pytrends', 'trends']) ? 'connected' : 'simulated',
+                agentReach: hasRealSource(data.data_sources, ['agent', 'social']) ? 'connected' : 'simulated',
+                scrapegraphai: hasRealSource(data.data_sources, ['scrape', 'scrapegraph', 'firecrawl']) ? 'connected' : 'simulated',
+                crawl4ai: hasRealSource(data.data_sources, ['crawl']) ? 'connected' : 'simulated',
+                firecrawl: hasRealSource(data.data_sources, ['firecrawl']) ? 'connected' : 'simulated'
               },
               lastChecked: new Date()
             });
