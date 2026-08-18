@@ -280,8 +280,8 @@ class ScrapeGraphAICollector:
         url = self._build_url(site, keyword)
 
         try:
-            from scrapegraphai.nodes import SearchLink
-            from openai import OpenAI
+            from scrapegraphai import OpenAI
+            from scrapegraphai.graphs import SmartScraperGraph
 
             api_key = os.getenv("SCRAPEGRAPHAI_API_KEY") or os.getenv("OPENAI_API_KEY", "")
             print(f"🔑 ScrapeGraphAI API key present: {bool(api_key)}")
@@ -290,28 +290,46 @@ class ScrapeGraphAICollector:
                 print("⚠️ No API key found, using mock data")
                 return self._generate_mock_products(keyword, site)
 
-            # Use ScrapeGraphAI's SearchLink node
-            search_node = SearchLink(
-                input_key="search_query",
-                output_key="link_list",
-                config={
-                    "llm": {
-                        "api_key": api_key,
-                        "model_name": "gpt-4"
-                    }
-                }
+            # Define the scraping prompt
+            prompt = """Extract product information from this page. For each product, get:
+            - Product name
+            - Price
+            - Rating (out of 5)
+            - Number of reviews
+            - Product URL
+
+            Return as a JSON array with fields: name, price, rating, reviews, url"""
+
+            # Create the scraping graph
+            graph_config = {
+                "llm": {
+                    "api_key": api_key,
+                    "model_name": "gpt-4"
+                },
+                "verbose": False,
+                "headless": True
+            }
+
+            smart_scraper_graph = SmartScraperGraph(
+                prompt=prompt,
+                source=url,
+                config=graph_config
             )
 
-            result = search_node.run({"search_query": keyword})
+            result = smart_scraper_graph.run()
 
             products = self._parse_scrape_result(result, site)
 
-            return ScrapeResult(
-                products=products,
-                competitors=[],
-                success=True,
-                source=f"ScrapeGraphAI ({site})"
-            )
+            if products:
+                return ScrapeResult(
+                    products=products,
+                    competitors=[],
+                    success=True,
+                    source=f"ScrapeGraphAI ({site})"
+                )
+            else:
+                print("⚠️ No products parsed, using mock data")
+                return self._generate_mock_products(keyword, site)
 
         except ImportError as e:
             print(f"⚠️ scrapegraphai not installed or import error: {e}")
@@ -333,17 +351,39 @@ class ScrapeGraphAICollector:
         """Parse ScrapeGraphAI result"""
         products = []
 
-        if isinstance(result, dict) and 'products' in result:
-            for p in result['products'][:10]:
-                products.append(ScrapedProduct(
-                    name=p.get('name', 'Unknown'),
-                    price=float(p.get('price', 0).replace('$', '').replace(',', '')),
-                    rating=float(p.get('rating', 4.0)),
-                    reviews=int(p.get('reviews', 0)),
-                    url=p.get('url', ''),
-                    source=f"ScrapeGraphAI ({site})"
-                ))
+        # Handle different result formats
+        data = result
+        if isinstance(result, dict):
+            # Try common keys
+            if 'products' in result:
+                data = result['products']
+            elif 'data' in result:
+                data = result['data']
+            else:
+                # Use the whole dict as data
+                data = [result]
 
+        # Handle list of products
+        if isinstance(data, list):
+            for p in data[:10]:
+                if isinstance(p, dict):
+                    name = p.get('name') or p.get('product_name') or p.get('title') or 'Unknown'
+                    price_str = str(p.get('price') or p.get('Price') or 0)
+                    price = float(price_str.replace('$', '').replace(',', ''))
+                    rating = float(p.get('rating') or p.get('Rating') or 4.0)
+                    reviews = int(p.get('reviews') or p.get('Reviews') or p.get('review_count') or 0)
+                    url = p.get('url') or p.get('link') or p.get('product_url') or ''
+
+                    products.append(ScrapedProduct(
+                        name=name,
+                        price=price,
+                        rating=rating,
+                        reviews=reviews,
+                        url=url,
+                        source=f"ScrapeGraphAI ({site})"
+                    ))
+
+        print(f"📦 Parsed {len(products)} products from ScrapeGraphAI result")
         return products
 
     def _generate_mock_products(self, keyword: str, site: str) -> ScrapeResult:
