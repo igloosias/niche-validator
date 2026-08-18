@@ -72,24 +72,59 @@ export function BackendStatusIndicator() {
             const dataSources = data.data_sources || [];
 
             // Map backend sources to frontend tool status
+            // Priority: Real > Simulated > Error > nothing
+            // Use the BEST match for each tool category
             const sourceToTool: Record<string, string> = {};
+
+            const getSourcePriority = (source: string): number => {
+              const lower = source.toLowerCase();
+              if (lower.includes('error')) return 0;
+              if (lower.includes('simulated')) return 1;
+              if (lower.includes('real')) return 2;
+              return -1;
+            };
+
+            const betterMatch = (existing: string | undefined, candidate: string): boolean => {
+              if (!existing) return true;
+              return getSourcePriority(candidate) > getSourcePriority(existing);
+            };
 
             dataSources.forEach((source: string) => {
               const lower = source.toLowerCase();
+
+              // pytrends
               if (lower.includes('pytrends') || lower.includes('trends')) {
-                sourceToTool['pytrends'] = source;
+                if (betterMatch(sourceToTool['pytrends'], source)) {
+                  sourceToTool['pytrends'] = source;
+                }
               }
+
+              // Agent-Reach (Reddit, YouTube, Twitter)
               if (lower.includes('praw') || lower.includes('reddit') || lower.includes('youtube') || lower.includes('ytdlp') || lower.includes('yt-dlp') || lower.includes('agent') || lower.includes('twitter')) {
-                sourceToTool['agentReach'] = source;
+                if (betterMatch(sourceToTool['agentReach'], source)) {
+                  sourceToTool['agentReach'] = source;
+                }
               }
-              if (lower.includes('scrapegraph') || lower.includes('scrape')) {
-                sourceToTool['scrapegraphai'] = source;
+
+              // ScrapeGraphAI
+              if (lower.includes('scrapegraph')) {
+                if (betterMatch(sourceToTool['scrapegraphai'], source)) {
+                  sourceToTool['scrapegraphai'] = source;
+                }
               }
+
+              // Crawl4AI
               if (lower.includes('crawl4ai') || lower.includes('crawl')) {
-                sourceToTool['crawl4ai'] = source;
+                if (betterMatch(sourceToTool['crawl4ai'], source)) {
+                  sourceToTool['crawl4ai'] = source;
+                }
               }
+
+              // Firecrawl (usually not in backend, but check anyway)
               if (lower.includes('firecrawl')) {
-                sourceToTool['firecrawl'] = source;
+                if (betterMatch(sourceToTool['firecrawl'], source)) {
+                  sourceToTool['firecrawl'] = source;
+                }
               }
             });
 
