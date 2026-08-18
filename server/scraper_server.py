@@ -860,8 +860,7 @@ if FASTAPI_AVAILABLE:
                 "Crawl4AI Reddit (Real)",
                 "yt-dlp (Real)",
                 "twitter (Error: Twitter needs browser)",
-                "Crawl4AI (aliexpress) (Real)",
-                "Crawl4AI (amazon) (Real)",
+                "ScrapeGraphAI (Real)",
                 "Crawl4AI (Real)"
             ],
             "trends": {

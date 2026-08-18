@@ -79,7 +79,7 @@ export function BackendStatusIndicator() {
               if (lower.includes('pytrends') || lower.includes('trends')) {
                 sourceToTool['pytrends'] = source;
               }
-              if (lower.includes('praw') || lower.includes('reddit') || lower.includes('youtube') || lower.includes('ytdlp') || lower.includes('agent')) {
+              if (lower.includes('praw') || lower.includes('reddit') || lower.includes('youtube') || lower.includes('ytdlp') || lower.includes('yt-dlp') || lower.includes('agent')) {
                 sourceToTool['agentReach'] = source;
               }
               if (lower.includes('scrapegraph')) {
