@@ -483,6 +483,20 @@ function ProductCard({ product, compact = false }: { product: any; compact?: boo
   const [expanded, setExpanded] = useState(false);
   const tierBadgeClass = product.tier === 1 ? 'bg-green-500/20 text-green-400 border border-green-500/30' : product.tier === 2 ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30' : 'bg-amber-500/20 text-amber-400 border border-amber-500/30';
 
+  // Get product link - use direct link if available, otherwise build from source
+  const getProductLink = () => {
+    if (product.supplier?.url && product.supplier.url.startsWith('http')) {
+      return product.supplier.url;
+    }
+    if (product.url && product.url.startsWith('http')) {
+      return product.url;
+    }
+    // Build AliExpress search link from niche keyword
+    return `https://www.aliexpress.com/wholesale?SearchText=${encodeURIComponent(product.name.replace(' - Option', '').trim())}`;
+  };
+
+  const productLink = getProductLink();
+
   if (compact) {
     return (
       <div className="bg-slate-800/50 backdrop-blur-sm border border-slate-700/50 rounded-xl p-4 hover:border-purple-500/30 transition-all cursor-pointer" onClick={() => setExpanded(!expanded)}>
@@ -501,7 +515,10 @@ function ProductCard({ product, compact = false }: { product: any; compact?: boo
   return (
     <div className="bg-slate-800/50 backdrop-blur-sm border border-slate-700/50 rounded-xl p-6 hover:border-purple-500/30 transition-all">
       <div className="flex items-start justify-between mb-4">
-        <div className="flex-1"><h4 className="font-semibold text-white mb-1">{product.name}</h4><p className="text-sm text-slate-400">{product.category}</p></div>
+        <div className="flex-1">
+          <h4 className="font-semibold text-white mb-1">{product.name}</h4>
+          <p className="text-sm text-slate-400">{product.category}</p>
+        </div>
         <div className="flex flex-col items-end gap-2">
           <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${tierBadgeClass}`}>Tier {product.tier}</span>
           <span className={`text-2xl font-bold font-mono ${product.overallScore >= 80 ? 'text-green-400' : product.overallScore >= 65 ? 'text-blue-400' : 'text-amber-400'}`}>{product.overallScore}</span>
@@ -519,6 +536,17 @@ function ProductCard({ product, compact = false }: { product: any; compact?: boo
         <div className="flex items-center gap-1.5 text-sm text-slate-400">{product.supplier.transactions.toLocaleString()} orders</div>
         <div className="flex items-center gap-1.5 text-sm text-slate-400">📦 {product.metrics.weight}</div>
       </div>
+
+      {/* Product Link Button */}
+      <a
+        href={productLink}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="mb-4 flex items-center justify-center gap-2 w-full px-4 py-2.5 bg-gradient-to-r from-purple-600 to-purple-500 hover:from-purple-500 hover:to-purple-400 text-white font-semibold rounded-lg transition-all shadow-lg shadow-purple-500/25"
+      >
+        <span>Find on AliExpress</span>
+        <ExternalLink className="w-4 h-4" />
+      </a>
 
       {product.risks.filter((r: any) => r.severity === 'high').length > 0 && (
         <div className="mb-4 p-3 rounded-lg bg-red-500/10 border border-red-500/20">
