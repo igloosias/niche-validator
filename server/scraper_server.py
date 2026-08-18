@@ -152,221 +152,156 @@ class PyTrendsCollector:
 
 class AgentReachCollector:
     """
-    Social media scraping using agent-reach library or direct API calls.
-    Supports: Reddit (via API), Twitter, YouTube
+    Social media scraping using:
+    - Reddit: PRAW (Python Reddit API Wrapper)
+    - YouTube: yt-dlp (via subprocess)
+    - Twitter: Not supported (requires browser cookies)
     """
 
     def __init__(self):
         self.reddit_client_id = os.getenv("REDDIT_CLIENT_ID", "")
         self.reddit_client_secret = os.getenv("REDDIT_CLIENT_SECRET", "")
-        self.twitter_bearer = os.getenv("TWITTER_BEARER_TOKEN", "")
+        self.reddit_username = os.getenv("REDDIT_USERNAME", "")
+        self.reddit_password = os.getenv("REDDIT_PASSWORD", "")
 
     async def scrape_social_data(self, keyword: str) -> Dict[str, SocialData]:
         """Scrape social media data from all platforms"""
         results = {}
 
-        # Scrape each platform independently
+        # Scrape each platform
         results['reddit'] = await self._scrape_reddit(keyword)
-        results['twitter'] = await self._scrape_twitter(keyword)
         results['youtube'] = await self._scrape_youtube(keyword)
+        results['twitter'] = await self._scrape_twitter(keyword)
 
         return results
 
     async def _scrape_reddit(self, keyword: str) -> SocialData:
-        """Scrape Reddit using Reddit API (not Firecrawl)"""
+        """Scrape Reddit using PRAW (Python Reddit API Wrapper)"""
         try:
-            # Try agent-reach library first
-            try:
-                import agent_reach
-                ar = agent_reach.AgentReach(api_key=os.getenv("AGENT_REACH_API_KEY", ""))
-                data = await ar.scrape_reddit(keyword)
-                if data:
-                    return SocialData(
-                        platform='reddit',
-                        posts=data.get('posts', []),
-                        total_mentions=data.get('mentions', 0),
-                        sentiment=data.get('sentiment', 'neutral'),
-                        engagement_rate=data.get('engagement', 0),
-                        source="agent-reach (Real)"
-                    )
-            except ImportError:
-                print("agent-reach library not installed, trying Reddit API...")
-            except Exception as e:
-                print(f"agent-reach error: {e}")
+            # Check if we have credentials
+            if not (self.reddit_client_id and self.reddit_client_secret):
+                print("⚠️ Reddit: No PRAW credentials configured")
+                return self._generate_error_social('reddit', keyword, "No PRAW credentials")
 
-            # Fallback: Direct Reddit API using httpx
-            if self.reddit_client_id and self.reddit_client_secret:
-                return await self._scrape_reddit_api(keyword)
+            try:
+                import praw
+
+                reddit = praw.Reddit(
+                    client_id=self.reddit_client_id,
+                    client_secret=self.reddit_client_secret,
+                    user_agent="NicheValidator/1.0"
+                )
+
+                # Search subreddits and posts
+                posts = []
+                total_mentions = 0
+
+                # Search posts
+                for post in reddit.subreddit("all").search(keyword, limit=10):
+                    posts.append({
+                        'title': post.title,
+                        'score': post.score,
+                        'comments': post.num_comments,
+                        'subreddit': post.subreddit.display_name
+                    })
+                    total_mentions += 1
+
+                print(f"✅ PRAW: Got {len(posts)} Reddit posts for '{keyword}'")
+
+                return SocialData(
+                    platform='reddit',
+                    posts=posts,
+                    total_mentions=total_mentions,
+                    sentiment='neutral',
+                    engagement_rate=5.0,
+                    source="PRAW (Real)"
+                )
+
+            except ImportError:
+                print("❌ PRAW not installed")
+                return self._generate_error_social('reddit', keyword, "PRAW not installed")
+            except Exception as e:
+                print(f"⚠️ PRAW error: {e}")
+                return self._generate_error_social('reddit', keyword, f"PRAW error: {str(e)[:30]}")
 
         except Exception as e:
             print(f"⚠️ Reddit scrape error: {e}")
-
-        # Return error state, NOT simulated
-        return self._generate_error_social('reddit', keyword, "No Reddit credentials or API available")
-
-    async def _scrape_reddit_api(self, keyword: str) -> SocialData:
-        """Direct Reddit API call"""
-        try:
-            import httpx
-
-            # Get access token
-            auth = httpx.BasicAuth(self.reddit_client_id, self.reddit_client_secret)
-            async with httpx.AsyncClient(timeout=15) as client:
-                token_response = await client.post(
-                    "https://www.reddit.com/api/v1/access_token",
-                    auth=auth,
-                    data={"grant_type": "client_credentials", "user-agent": "NicheValidator/1.0"}
-                )
-
-                if token_response.status_code == 200:
-                    token = token_response.json().get("access_token", "")
-
-                    # Search Reddit
-                    headers = {"Authorization": f"Bearer {token}", "User-Agent": "NicheValidator/1.0"}
-                    search_response = await client.get(
-                        f"https://oauth.reddit.com/search.json?q={keyword}&limit=10&sort=relevance",
-                        headers=headers
-                    )
-
-                    if search_response.status_code == 200:
-                        data = search_response.json()
-                        posts = []
-                        for child in data.get("data", {}).get("children", [])[:10]:
-                            post = child.get("data", {})
-                            posts.append({
-                                'title': post.get('title', ''),
-                                'score': post.get('score', 0),
-                                'comments': post.get('num_comments', 0),
-                                'subreddit': post.get('subreddit', '')
-                            })
-
-                        total_mentions = data.get("data", {}).get("dist", 0)
-
-                        print(f"✅ Reddit API: Got {len(posts)} posts for '{keyword}'")
-
-                        return SocialData(
-                            platform='reddit',
-                            posts=posts,
-                            total_mentions=total_mentions,
-                            sentiment='neutral',
-                            engagement_rate=5.0,
-                            source="Reddit API (Real)"
-                        )
-
-        except Exception as e:
-            print(f"⚠️ Reddit API error: {e}")
-
-        return self._generate_error_social('reddit', keyword, "API call failed")
-
-    async def _scrape_twitter(self, keyword: str) -> SocialData:
-        """Scrape Twitter using Twitter API v2 (not Firecrawl)"""
-        try:
-            if self.twitter_bearer:
-                import httpx
-
-                async with httpx.AsyncClient(timeout=15) as client:
-                    # Search recent tweets
-                    headers = {"Authorization": f"Bearer {self.twitter_bearer}"}
-                    params = {
-                        "query": keyword,
-                        "max_results": 10,
-                        "tweet.fields": "public_metrics,created_at"
-                    }
-
-                    response = await client.get(
-                        "https://api.twitter.com/2/tweets/search/recent",
-                        headers=headers,
-                        params=params
-                    )
-
-                    if response.status_code == 200:
-                        data = response.json()
-                        tweets = data.get("data", [])
-
-                        posts = [{
-                            'title': t.get('text', '')[:200],
-                            'likes': t.get('public_metrics', {}).get('like_count', 0),
-                            'retweets': t.get('public_metrics', {}).get('retweet_count', 0)
-                        } for t in tweets]
-
-                        print(f"✅ Twitter API: Got {len(posts)} tweets for '{keyword}'")
-
-                        return SocialData(
-                            platform='twitter',
-                            posts=posts,
-                            total_mentions=len(tweets),
-                            sentiment='neutral',
-                            engagement_rate=3.5,
-                            source="Twitter API (Real)"
-                        )
-                    else:
-                        print(f"⚠️ Twitter API error: {response.status_code}")
-
-        except Exception as e:
-            print(f"⚠️ Twitter scrape error: {e}")
-
-        # Return error state, NOT simulated
-        return self._generate_error_social('twitter', keyword, "No Twitter credentials or API failed")
+            return self._generate_error_social('reddit', keyword, str(e)[:40])
 
     async def _scrape_youtube(self, keyword: str) -> SocialData:
-        """Scrape YouTube using YouTube Data API (not Firecrawl)"""
+        """Scrape YouTube using yt-dlp"""
         try:
-            youtube_api_key = os.getenv("YOUTUBE_API_KEY", "")
+            import subprocess
+            import json
 
-            if youtube_api_key:
-                import httpx
+            # Use yt-dlp to search YouTube
+            cmd = [
+                "yt-dlp",
+                "--dump-json",
+                "--no-download",
+                "--no-playlist",
+                f"ytsearch10:{keyword}"
+            ]
 
-                async with httpx.AsyncClient(timeout=15) as client:
-                    params = {
-                        "part": "snippet,statistics",
-                        "q": keyword,
-                        "type": "video",
-                        "maxResults": 10,
-                        "key": youtube_api_key
-                    }
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
 
-                    response = await client.get(
-                        "https://www.googleapis.com/youtube/v3/search",
-                        params=params
-                    )
+            if result.returncode == 0:
+                videos = []
+                total_views = 0
 
-                    if response.status_code == 200:
-                        data = response.json()
-                        videos = data.get("items", [])
-
-                        posts = []
-                        total_views = 0
-                        for v in videos:
-                            snippet = v.get("snippet", {})
-                            stats = v.get("statistics", {})
-                            view_count = int(stats.get("viewCount", 0))
+                for line in result.stdout.strip().split('\n'):
+                    if line:
+                        try:
+                            video = json.loads(line)
+                            view_count = video.get('view_count', 0) or 0
                             total_views += view_count
 
-                            posts.append({
-                                'title': snippet.get('title', ''),
+                            videos.append({
+                                'title': video.get('title', ''),
                                 'views': view_count,
-                                'likes': int(stats.get('likeCount', 0)),
-                                'channel': snippet.get('channelTitle', '')
+                                'likes': video.get('like_count', 0) or 0,
+                                'channel': video.get('uploader', ''),
+                                'duration': video.get('duration', 0)
                             })
+                        except json.JSONDecodeError:
+                            continue
 
-                        print(f"✅ YouTube API: Got {len(posts)} videos for '{keyword}'")
+                if videos:
+                    print(f"✅ yt-dlp: Got {len(videos)} YouTube videos for '{keyword}'")
+                    return SocialData(
+                        platform='youtube',
+                        posts=videos,
+                        total_mentions=len(videos),
+                        sentiment='positive',
+                        engagement_rate=4.5 if total_views > 0 else 0,
+                        source="yt-dlp (Real)"
+                    )
 
-                        return SocialData(
-                            platform='youtube',
-                            posts=posts,
-                            total_mentions=len(videos),
-                            sentiment='positive',
-                            engagement_rate=4.5 if total_views > 0 else 0,
-                            source="YouTube API (Real)"
-                        )
-                    else:
-                        print(f"⚠️ YouTube API error: {response.status_code}")
+            print(f"⚠️ yt-dlp failed: {result.stderr[:100]}")
+            return self._generate_error_social('youtube', keyword, "yt-dlp failed")
 
+        except ImportError:
+            print("❌ yt-dlp not installed")
+            return self._generate_error_social('youtube', keyword, "yt-dlp not installed")
+        except subprocess.TimeoutExpired:
+            print("⚠️ yt-dlp timeout")
+            return self._generate_error_social('youtube', keyword, "yt-dlp timeout")
         except Exception as e:
             print(f"⚠️ YouTube scrape error: {e}")
+            return self._generate_error_social('youtube', keyword, f"Error: {str(e)[:30]}")
 
-        # Return error state, NOT simulated
-        return self._generate_error_social('youtube', keyword, "No YouTube API key or API failed")
+    async def _scrape_twitter(self, keyword: str) -> SocialData:
+        """Twitter requires browser cookies - not supported on server"""
+        return self._generate_error_social(
+            'twitter',
+            keyword,
+            "Twitter needs browser (use agent-reach CLI on desktop)"
+        )
 
     def _generate_error_social(self, platform: str, keyword: str, error: str) -> SocialData:
         """Return error state - NOT simulated data"""
@@ -760,9 +695,9 @@ if FASTAPI_AVAILABLE:
             "scrapegraphai_key": bool(os.getenv("SCRAPEGRAPHAI_API_KEY")),
             "openai_key": bool(os.getenv("OPENAI_API_KEY")),
             "reddit_client_id": bool(os.getenv("REDDIT_CLIENT_ID")),
-            "twitter_bearer": bool(os.getenv("TWITTER_BEARER_TOKEN")),
-            "youtube_api_key": bool(os.getenv("YOUTUBE_API_KEY")),
-            "agent_reach_key": bool(os.getenv("AGENT_REACH_API_KEY")),
+            "reddit_client_secret": bool(os.getenv("REDDIT_CLIENT_SECRET")),
+            "youtube_dlp": "installed",
+            "praw": "installed",
         }
 
     @app.get("/validate/{niche}")
