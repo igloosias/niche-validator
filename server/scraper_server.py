@@ -595,6 +595,15 @@ if FASTAPI_AVAILABLE:
     async def health():
         return {"status": "healthy"}
 
+    @app.get("/debug/env")
+    async def debug_env():
+        """Check environment variables (debug only)"""
+        return {
+            "scrapegraphai_key": bool(os.getenv("SCRAPEGRAPHAI_API_KEY")),
+            "openai_key": bool(os.getenv("OPENAI_API_KEY")),
+            "scrapegraphai_key_value": os.getenv("SCRAPEGRAPHAI_API_KEY", "")[:10] + "..." if os.getenv("SCRAPEGRAPHAI_API_KEY") else None
+        }
+
     @app.get("/validate/{niche}")
     async def validate_niche(niche: str):
         """Full niche validation"""
