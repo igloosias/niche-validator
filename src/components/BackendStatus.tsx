@@ -62,17 +62,44 @@ export function BackendStatusIndicator() {
         try {
           const validateResponse = await fetch(`${BACKEND_URL}/validate/test`, {
             method: 'GET',
-            signal: AbortSignal.timeout(10000)
+            signal: AbortSignal.timeout(30000) // 30 second timeout for scraping
           });
 
           if (validateResponse.ok) {
             const data = await validateResponse.json();
 
-            // Check if sources are Real (not simulated)
-            const hasRealSource = (sources: string[], keywords: string[]) => {
-              return sources?.some((s: string) =>
-                keywords.some(k => s.toLowerCase().includes(k)) && !s.toLowerCase().includes('simulated')
-              );
+            // Get all data sources from response
+            const dataSources = data.data_sources || [];
+
+            // Map backend sources to frontend tool status
+            const sourceToTool: Record<string, string> = {};
+
+            dataSources.forEach((source: string) => {
+              const lower = source.toLowerCase();
+              if (lower.includes('pytrends') || lower.includes('trends')) {
+                sourceToTool['pytrends'] = source;
+              }
+              if (lower.includes('praw') || lower.includes('reddit') || lower.includes('youtube') || lower.includes('ytdlp') || lower.includes('agent')) {
+                sourceToTool['agentReach'] = source;
+              }
+              if (lower.includes('scrapegraph')) {
+                sourceToTool['scrapegraphai'] = source;
+              }
+              if (lower.includes('crawl4ai') || lower.includes('crawl')) {
+                sourceToTool['crawl4ai'] = source;
+              }
+              if (lower.includes('firecrawl')) {
+                sourceToTool['firecrawl'] = source;
+              }
+            });
+
+            // Determine status for each tool
+            const getToolStatus = (toolKey: string): 'connected' | 'simulated' | 'unavailable' => {
+              const source = sourceToTool[toolKey];
+              if (!source) return 'unavailable';
+              if (source.toLowerCase().includes('error')) return 'unavailable';
+              if (source.toLowerCase().includes('simulated')) return 'simulated';
+              return 'connected';
             };
 
             setStatus({
@@ -80,11 +107,11 @@ export function BackendStatusIndicator() {
               url: BACKEND_URL,
               checking: false,
               tools: {
-                pytrends: hasRealSource(data.data_sources, ['pytrends', 'trends']) ? 'connected' : 'simulated',
-                agentReach: hasRealSource(data.data_sources, ['agent', 'social']) ? 'connected' : 'simulated',
-                scrapegraphai: hasRealSource(data.data_sources, ['scrape', 'scrapegraph', 'firecrawl']) ? 'connected' : 'simulated',
-                crawl4ai: hasRealSource(data.data_sources, ['crawl']) ? 'connected' : 'simulated',
-                firecrawl: hasRealSource(data.data_sources, ['firecrawl']) ? 'connected' : 'simulated'
+                pytrends: getToolStatus('pytrends'),
+                agentReach: getToolStatus('agentReach'),
+                scrapegraphai: getToolStatus('scrapegraphai'),
+                crawl4ai: getToolStatus('crawl4ai'),
+                firecrawl: getToolStatus('firecrawl')
               },
               lastChecked: new Date()
             });
