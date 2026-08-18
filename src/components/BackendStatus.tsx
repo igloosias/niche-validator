@@ -15,7 +15,7 @@ interface BackendStatus {
   lastChecked: Date | null;
 }
 
-const BACKEND_URL = import.meta.env.VITE_SCRAPER_SERVER_URL || '';
+const BACKEND_URL = import.meta.env.VITE_SCRAPER_SERVER_URL || 'https://niche-validator-production-5c6b.up.railway.app';
 
 export function BackendStatusIndicator() {
   const [status, setStatus] = useState<BackendStatus>({
